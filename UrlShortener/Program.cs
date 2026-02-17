@@ -22,6 +22,8 @@ builder.Services.AddScoped<ShortCodeService>();
 
 builder.Services.AddControllers();
 
+builder.Services.AddSingleton<RedisService>();
+
 
 var app = builder.Build();
 

@@ -11,13 +11,16 @@ namespace UrlShortener.Controllers
     {
         private readonly AppDbContext _context;
         private readonly ShortCodeService _codeService;
+        private readonly RedisService _redis;
 
         public UrlController(
             AppDbContext context,
-            ShortCodeService codeService)
+            ShortCodeService codeService, 
+            RedisService redis)
         {
             _context = context;
             _codeService = codeService;
+            _redis = redis;
         }
 
         [HttpPost("shorten")]
@@ -48,11 +51,20 @@ namespace UrlShortener.Controllers
         [HttpGet("{code}")]
         public IActionResult RedirectUrl(string code)
         {
-           var url = _context.ShortUrls
+            //check Redis
+            var cachedUrl = _redis.GetUrl(code);
+
+            if(!string.IsNullOrEmpty(cachedUrl))
+              return Redirect(cachedUrl);
+
+            //check DB
+            var url = _context.ShortUrls
               .FirstOrDefault(x => x.ShortCode == code);
 
-           if (url == null)
+            if (url == null)
               return NotFound("Short URL not found");
+        
+          _redis.SetUrl(code, url.OriginalUrl);
 
           return Redirect(url.OriginalUrl);
         }
