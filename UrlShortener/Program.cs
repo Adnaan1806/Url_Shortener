@@ -1,5 +1,9 @@
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;   
 using UrlShortener.Data;
+using UrlShortener.Models;
+using UrlShortener.Services;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +18,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     )
 );
 
+builder.Services.AddScoped<ShortCodeService>();
+
+builder.Services.AddControllers();
+
+
 var app = builder.Build();
 
 // Configure pipeline
@@ -27,5 +36,7 @@ app.UseHttpsRedirection();
 
 // Test endpoint
 app.MapGet("/", () => "URL Shortener API Running");
+
+app.MapControllers();
 
 app.Run();
