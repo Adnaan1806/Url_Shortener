@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using UrlShortener.Data;
 using UrlShortener.Models;
 using UrlShortener.Services;
+using UrlShortener.Data.Shards;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,7 +19,15 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     )
 );
 
+builder.Services.AddDbContext<Shard1DbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Shard1")));
+
+builder.Services.AddDbContext<Shard2DbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Shard2")));
+
+
 builder.Services.AddScoped<ShortCodeService>();
+builder.Services.AddSingleton<ShardRouter>();
 
 builder.Services.AddControllers();
 

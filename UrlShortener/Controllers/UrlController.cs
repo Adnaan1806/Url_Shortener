@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
-using UrlShortener.Data;
 using UrlShortener.Models;
 using UrlShortener.Services;
+using UrlShortener.Data.Shards;
 
 namespace UrlShortener.Controllers
 {
@@ -9,22 +9,29 @@ namespace UrlShortener.Controllers
     [Route("")]
     public class UrlController : ControllerBase
     {
-        private readonly AppDbContext _context;
         private readonly ShortCodeService _codeService;
         private readonly RedisService _redis;
+        private readonly Shard1DbContext _shard1;
+        private readonly Shard2DbContext _shard2;
+        private readonly ShardRouter _router;
 
         public UrlController(
-            AppDbContext context,
-            ShortCodeService codeService, 
-            RedisService redis)
+            Shard1DbContext shard1,
+            Shard2DbContext shard2,
+            ShortCodeService codeService,
+            RedisService redis,
+            ShardRouter router)
         {
-            _context = context;
+            _shard1 = shard1;
+            _shard2 = shard2;
             _codeService = codeService;
             _redis = redis;
+            _router = router;
         }
 
+        // 🔹 SHORTEN URL (WRITE → SHARD)
         [HttpPost("shorten")]
-        public async Task<IActionResult> ShortenUrl([FromBody] string url)
+        public IActionResult ShortenUrl([FromBody] string url)
         {
             if (string.IsNullOrEmpty(url))
                 return BadRequest("Invalid URL");
@@ -38,36 +45,61 @@ namespace UrlShortener.Controllers
                 OriginalUrl = url
             };
 
-            _context.ShortUrls.Add(shortUrl);
-            await _context.SaveChangesAsync();
+            // Decide shard
+            var shardId = _router.GetShard(code);
+
+            if (shardId == 0)
+            {
+                _shard1.ShortUrls.Add(shortUrl);
+                _shard1.SaveChanges();
+            }
+            else
+            {
+                _shard2.ShortUrls.Add(shortUrl);
+                _shard2.SaveChanges();
+            }
 
             return Ok(new
             {
                 shortCode = code,
-                shortUrl = $"http://localhost:5116/{code}"
+                shortUrl = $"http://localhost:5116/{code}",
+                shard = shardId   // optional debug info
             });
         }
 
+        // 🔹 REDIRECT URL (READ → CACHE → SHARD)
         [HttpGet("{code}")]
         public IActionResult RedirectUrl(string code)
         {
-            //check Redis
+            // 1️⃣ Check Redis cache
             var cachedUrl = _redis.GetUrl(code);
 
-            if(!string.IsNullOrEmpty(cachedUrl))
-              return Redirect(cachedUrl);
+            if (!string.IsNullOrEmpty(cachedUrl))
+                return Redirect(cachedUrl);
 
-            //check DB
-            var url = _context.ShortUrls
-              .FirstOrDefault(x => x.ShortCode == code);
+            // 2️⃣ Determine shard
+            var shardId = _router.GetShard(code);
+
+            ShortUrl? url = null;
+
+            if (shardId == 0)
+            {
+                url = _shard1.ShortUrls
+                    .FirstOrDefault(x => x.ShortCode == code);
+            }
+            else
+            {
+                url = _shard2.ShortUrls
+                    .FirstOrDefault(x => x.ShortCode == code);
+            }
 
             if (url == null)
-              return NotFound("Short URL not found");
-        
-          _redis.SetUrl(code, url.OriginalUrl);
+                return NotFound("Short URL not found");
 
-          return Redirect(url.OriginalUrl);
+            // 3️⃣ Cache result
+            _redis.SetUrl(code, url.OriginalUrl);
+
+            return Redirect(url.OriginalUrl);
         }
-
     }
 }
